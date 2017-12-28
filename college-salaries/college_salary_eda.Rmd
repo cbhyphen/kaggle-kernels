@@ -1,0 +1,370 @@
+---
+title: "Post-College Salaries Exploration in R"
+output:
+  html_document:
+    toc: true
+    theme: readable
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = F, message = F,
+                      fig.width=7)
+```
+
+## Setup
+
+After reviewing information on kaggle, I can see that there are 3 different data sets:
+
+- salaries by degree
+- salaries by college and type
+- salaries by college and region
+
+and each of the data sets has the following features in common:
+
+- starting median salary
+- mid-career salaries for 10th, 25th, 50th, 75th, and 90th percentiles
+
+```{r}
+# load packages and data
+library(tidyverse)
+
+csv_files <- list.files(pattern = ".csv")
+
+# if not worried about column types
+#dfs <- map(csv_files, read_csv)
+#names(dfs) <- c("deg", "col", "reg")
+
+df_deg <- read_csv(csv_files[1],
+                   col_names = c("major", "start_med_slry", "mid_car_slry",
+                                 "percent_chng", "mid_car_10th", "mid_car_25th",
+                                 "mid_car_75th", "mid_car_90th"),  # short names w/o whitespace
+                   col_types = "cnndnnnn",  # specify column types to coerce '$' to numeric
+                   skip = 1)  # names specified, skip header
+
+df_col <- read_csv(csv_files[2],
+                   col_names = c("school_name", "school_type", "start_med_slry",
+                                 "mid_car_slry", "mid_car_10th", "mid_car_25th",
+                                 "mid_car_75th", "mid_car_90th"),
+                   col_types = "ccnnnnnn", skip = 1)
+
+df_reg <- read_csv(csv_files[3],
+                   col_names = c("school_name", "region", "start_med_slry",
+                                 "mid_car_slry", "mid_car_10th", "mid_car_25th",
+                                 "mid_car_75th", "mid_car_90th"),
+                   col_types = "ccnnnnnn", skip = 1)
+```
+
+## Overview of the data sets
+
+Here's a brief look at the salaries by degree data set.
+
+```{r}
+glimpse(df_deg)
+```
+
+As well as the salaries by college and type.
+
+```{r}
+glimpse(df_col)
+```
+
+And the salaries by college and region.
+
+```{r}
+glimpse(df_reg)
+```
+
+Because the data sets by college type and college region include individual colleges, there are a lot more observations.  The college by region data set has the most observations and appears to be the most complete in terms of the amount of colleges included.  I'll use that data set primarily to explore any relationships between the salaries features alone.
+
+### Missing data
+
+There are also various missing values for different percentiles of mid-career salary.  This appears to be most in the college by type and college by region data sets but we can inspect to see.
+
+```{r}
+print('missing data by feature for college degree data set')
+colSums(is.na(df_deg))
+
+print('missing data by feature for college type data set')
+colSums(is.na(df_col))
+
+print('missing data by feature for college region data set')
+colSums(is.na(df_reg))
+```
+
+So there is some missing data for the mid-career salaries of the 10th and 90th percentiles in both the college by type and college by region data sets.  Luckily we have complete infomration for the 25th and 75th percentiles across all data sets so this should be able to give some idea for the range although not at the extremes of salaries. 
+
+## Analysis
+
+### Distribution of starting and mid-career salaries
+
+What are the distributions for starting median salary and mid-career median salary by college?
+
+```{r}
+library(forcats)  # easy factors
+
+# select starting and mid-career salaries and reformat to long
+df_start_vs_med <- df_reg %>%
+  select(start_med_slry, mid_car_slry) %>%
+  gather(timeline, salary) %>%
+  mutate(timeline = as_factor(timeline, fct_rev))  # reverse levels, start salary first
+# plot histogram with height as density and smoothed density
+ggplot(df_start_vs_med, aes(salary, fill = timeline)) +
+  geom_density(alpha = 0.2, color = NA) +
+  geom_histogram(aes(y = ..density..), alpha = 0.5, position = 'dodge') +
+  scale_fill_manual(values = c('green', 'purple')) +
+  theme(legend.position = "top")
+
+library(scales)  # easy number formatting for inline R (in markdown below)
+```
+
+The distribution for starting median salary is definitely concentrated at the lower range of salaries and is somewhat right-skewed.  Graduates of most schools start out with a median of `r dollar(median(df_reg$start_med_slry))` although there is a maximum median starting salary of `r dollar(max(df_reg$start_med_slry))`.  As working time progresses to mid-career, the distribution of median (50th percentile) salaries becomes more dispersed and the median of these increases to `r dollar(median(df_reg$mid_car_slry))`
+
+### Any correlation between starting and mid-career salaries?
+
+I would expect this to be true, but data due dilligence requires that we inspect this to see if there is any correlation, and if so, how strong it is.
+
+```{r}
+ggplot(df_reg, aes(start_med_slry, mid_car_slry)) +
+  geom_point(alpha = 0.6) +
+  geom_smooth()  # loess fit
+
+paste('correlation coefficient',
+      round(with(df_reg, cor(start_med_slry, mid_car_slry)), 4))
+```
+
+There is a fairly strong correlation although the relationship is not simply linear.  As starting median salary increases, the slope of a first order coefficient seems to decrease there doesn't appear to be enough data at that end to make a conclusive statement. 
+
+## Salaries by degree type
+
+How do salaries differ by degree?  Which majors show the highest starting salaries?
+
+```{r fig.height=8}
+ggplot(df_deg, aes(x = reorder(major, start_med_slry), start_med_slry)) +
+  #geom_col() +
+  geom_point(color = "darkred") +
+  xlab(NULL) +
+  coord_flip()
+```
+
+Engineering, computer science, and 2 health occupational degrees have the highest median starting salaries.  But what about long-term salary potential?  Which degrees show the most growth in salary from starting to mid-career?
+
+```{r fig.height=8}
+# from wide to long format for mid-career percentiles
+df_maj_start_mid <- df_deg %>%
+  select(major, percent_chng, start_med_slry, mid_car_slry) %>%
+  gather(timeline, salary, start_med_slry, mid_car_slry) %>%
+  mutate(timeline = as_factor(timeline, fct_rev))
+
+ggplot(df_maj_start_mid, aes(x = reorder(major, percent_chng),
+                             y = salary, fill = timeline)) +
+  #geom_point() +
+  geom_col(position = 'identity', alpha = 0.3) +
+  scale_fill_manual(values = c('green', 'purple')) +
+  xlab(NULL) +
+  coord_flip() +
+  theme(legend.position = "top")
+```
+
+This plot is ordered by those degrees that show the most percent change in career salary.  Although physician assistant has the highest starting salary, the median mid-career salary doesn't show a lot of change.  Majors like Philosophy and Math seem to grow the most by mid-career.  We can see that many of the engineering degrees, although with not the most change, start high and still have a high mid-career salary.
+
+To get an idea for the ranges of mid-career salary, here's a plot of the different percentiles at mid-career.  This plot is ordered by degrees with the highest 90th percentile of mid-career salary.
+
+```{r fig.height=8, fig.width=8}
+# from wide to long format for mid-career percentiles
+df_maj_mid_car <- df_deg %>%
+  select(major, percent_chng,
+         mid_car_10th, mid_car_25th, mid_car_75th, mid_car_90th) %>%
+  gather(percentile, salary, mid_car_10th:mid_car_90th)
+
+ggplot(df_maj_mid_car, aes(x = reorder(major, percent_chng),
+                           y = salary,
+                           color = percentile)) +
+  geom_point() +
+  scale_color_brewer(type = 'div') +
+  xlab(NULL) +
+  coord_flip() +
+  theme(legend.position = "top")
+```
+
+Several majors such as economics, finance, and chemical engineering have a lot of salary potential.  Others such as nutrition and nursing have a tight range of mid-career salary and those at the 90th percentile don't appear to exceed the 100k salary mark.  This is something to be aware of if you want to have a higher salary mid-career.
+
+## Salaries by college type
+
+One of the data sets has salaries by college and college type.  Here is a plot of the distribution over different college types.
+
+```{r}
+qplot(df_col$school_type)
+```
+
+most of the schools in the data set are state schools.  The question comes to mind if any schools have multiple types...
+
+```{r}
+# colleges that appear as more than 1 type
+df_col_mult_types <- df_col %>%
+  group_by(school_name) %>%
+  mutate(num_types = n()) %>%
+  filter(num_types > 1) %>%
+  summarise(cross_listed = paste(school_type, collapse = '-')) %>%
+  arrange(desc(school_name))
+
+ggplot(df_col_mult_types, aes(cross_listed)) +
+  geom_bar() +
+  stat_count(aes(label = ..count..), geom = "text", vjust = -0.5)
+```
+
+There are some schools that appear more than once in this data set.  Those that do are mostly state and party schools.  I'd like to get an idea for which of these have multiple types.
+
+```{r}
+# names of state schools that are also party schools
+logical_party_state <- df_col_mult_types$cross_listed == 'Party-State'
+names_party_state <- df_col_mult_types$school_name[logical_party_state]
+
+names_party_state
+```
+
+The one liberal arts school that is also a party school is `r df_col_mult_types$school_name[which(df_col_mult_types$cross_listed == 'Party-Liberal Arts')]`.
+
+What is the relationship between starting and mid-career salary by school type?
+
+```{r}
+# wide to long again for starting and mid-career salary
+df_col_type_slry <- df_col %>%
+  select(school_type, start_med_slry, mid_car_slry) %>%
+  gather(timeline, salary, start_med_slry:mid_car_slry) %>%
+  mutate(timeline = as_factor(timeline, fct_rev))
+
+ggplot(df_col_type_slry, aes(school_type, salary, color = timeline)) +
+  geom_jitter(alpha = 0.2) +
+  geom_boxplot(alpha = 0.6, outlier.color = NA) +
+  scale_color_manual(values = c('green', 'purple')) +
+  theme(legend.position = "top")
+```
+
+It's pretty clear that both engineering and ivy league schools have higher starting and mid-career median salaries.  What I'm most curious about here is the difference between party schools that are state schools, and state schools that are not party schools.  Starting salaries for these two appear to be similar, although party schools seem to have a higher mid-career salary over state schools.  I wonder what the differences would be focusing on the different types of state school (party and not party).
+
+### Should you go to a state school that is a party school?
+
+```{r}
+# names of state schools that are not party schools
+logical_state_not_party <- df_col$school_type == 'State' &
+  !(df_col$school_name %in% names_party_state)  # logical vector on 'df_col'
+names_state_no_party <- df_col$school_name[logical_state_not_party]
+# double-check counts
+stopifnot(sum(df_col$school_type == 'State') ==
+            length(names_party_state) + length(names_state_no_party))
+
+# subset college data set to include party schools and state schools separately
+logical_state_and_party <- df_col$school_type == 'State' &
+  !logical_state_not_party  # logical vector on 'df_col'
+
+df_state_vs_party <- df_col %>%
+  select(school_name, start_med_slry, mid_car_slry) %>%
+  filter(logical_state_not_party | logical_state_and_party) %>%  # party and not party state schools
+  mutate(party_school = school_name %in% names_party_state)
+# wide to long
+df_state_vs_party_long <- df_state_vs_party %>%
+  gather(timeline, salary, start_med_slry, mid_car_slry) %>%
+  mutate(timeline = as_factor(timeline, fct_rev))
+# plot difference in starting and mid-career salaries
+ggplot(df_state_vs_party_long, aes(party_school, salary, color = timeline)) +
+  geom_jitter(alpha = 0.2) +
+  geom_boxplot(alpha = 0.6, outlier.color = NA) +
+  scale_color_manual(values = c('green', 'purple')) +
+  theme(legend.position = "top")
+```
+
+It looks as though the mid-career salary for state schools that are party schools is higher than non-party state schools.  There is much less data for state schools that are party schools and having more data would help.  Let's run a t-test to see if there is any statistical basis for this observation.
+
+```{r}
+df_state_vs_party_midcar_long <-
+  df_state_vs_party_long[df_state_vs_party_long$timeline == 'mid_car_slry', ]
+
+t.test(salary ~ party_school, df_state_vs_party_midcar_long)
+```
+
+It does seem that mid-career median salaries for state-party schools is higher than just state schools.  Again more data would be valuable here as there aren't a whole lot of observations for just state-party schools.  Let's see if there is any difference for starting salary.
+
+```{r}
+df_state_vs_party_midcar_long2 <-
+  df_state_vs_party_long[df_state_vs_party_long$timeline == 'start_med_slry', ]
+
+t.test(salary ~ party_school, df_state_vs_party_midcar_long2)
+```
+
+I'm pretty suprised that there is some statistical significance here.  Again, more data would help, but this seems to imply that if you have the chance to attend a state school, all other factors being equal, it would be better to attend a state school that is also a party school.  The starting and mid-career median salaries are statistically higher for state-party schools as opposed to state non-party schools.
+
+## Salaries by Region
+
+Here is a look at the salaries by college region data set.  What is the distribution across regions?
+
+```{r}
+qplot(df_reg$region)
+```
+
+It's kinda funny that California gets it's own region.  Being from this state, I do know there are a good number of Universities/Colleges here and the demand to come to California is high for both study and work.
+
+Take a look if there is any difference in starting or mid-career salary by region.
+
+```{r}
+# wide to long
+df_reg_slry <- df_reg %>%
+  select(region, start_med_slry, mid_car_slry) %>%
+  gather(timeline, salary, start_med_slry:mid_car_slry) %>%
+  mutate(timeline = as_factor(timeline, fct_rev))
+
+ggplot(df_reg_slry, aes(region, salary, color = timeline)) +
+  geom_jitter(alpha = 0.2) +
+  geom_boxplot(alpha = 0.6, outlier.color = NA) +
+  scale_color_manual(values = c('green', 'purple')) +
+  theme(legend.position = "top")
+```
+
+This is interesting, both California and the Northeastern region appear to have both higher starting and mid-career salaries.  Most Ivy League schools are in the Northeastern region, so this could be in part due to that.
+
+### Region and type
+
+There are a few colleges for which there are both type and region data in their respective data sets.  We can combine these to see if we can come up with any finer insights about salary across these 2 categories.
+
+First, what does the distribution look like across college type and region?
+
+```{r}
+# keep college names and types from the college data set
+logical_keep_type_cols <- colnames(df_col) %in% c('school_name', 'school_type')
+# inner join (leave any non-matched schools out)
+df_reg_col <- merge(x = df_reg, y = df_col[, logical_keep_type_cols],
+                    by = 'school_name')
+
+ggplot(df_reg_col, aes(region, fill = school_type)) +
+  geom_bar(position = 'dodge') +
+  scale_fill_brewer(type = 'qual') +
+  theme(legend.position = "top")
+```
+
+The northeastern region seems to dominate when it comes to ivy league (all accounted for), liberal arts, and engineering schools... the most party schools seem to be in the south.
+
+How do starting salary and mid-career median salary differ over these regions?
+
+```{r}
+# average of medians, not a great statistic
+#ggplot(df_reg_col, aes(region, school_type, z = start_med_slry)) +
+#  stat_summary_2d()
+
+# bar chart better than 2d density w/ color
+ggplot(df_reg_col, aes(region, mid_car_slry, fill = school_type)) +
+  stat_summary(geom = 'col', position = 'dodge', alpha = 0.6, color = 'gray') +
+  stat_summary(aes(region, start_med_slry, fill = school_type),
+               geom = 'col', position = 'dodge', color = 'gray') +
+  scale_fill_brewer(type = 'qual') +
+  theme(legend.position = "top") +
+  ylab('salary') +
+  ggtitle('mean starting and mid-career median salaries')
+```
+
+Superimposed on the median starting career salaries with a lighter shade, is the mean mid-career median salary.  The better median starting salaries across almost all regions is dominated by engineering schools.  In the northeast, engineering and ivy league starting salaries are pretty even.  But mid-career the value of an ivy league education is superior.  Interestingly, in the south, mid-career salaries tend to be higher for liberal arts schools.  In California and the rest of the west, if you can't get into an engineering school, it appears better to attend a party school than a state school for mid-career salary potential.
+
+```{r}
+# individual schools in region-type...
+```
+
+
