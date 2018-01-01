@@ -1,0 +1,146 @@
+---
+title: "Exploring chocolates with R"
+output:
+  html_document:
+    toc: true
+    number_sections: true
+    theme: readable
+    highlight: textmate
+    code_folding: hide
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = T, warning = F, message = F,
+                      fig.width = 7)
+```
+
+---
+
+# Overview of the data set
+
+```{r}
+library(tidyverse)
+df_choc <- read_csv('flavors_of_cacao.csv',
+                    col_types = 'ccnnncdcc',
+                    col_names = c('company', 'orgn_or_nm', 'ref',
+                                  'rvw_dt', 'coa_prcnt', 'cmpny_loc',
+                                  'rating', 'bean_type', 'bean_orgn'))
+df_choc <- df_choc[-1, ]  # header duplicated as first observation
+```
+
+overview of data...
+
+```{r}
+glimpse(df_choc)
+```
+
+## Features and distributions
+
+various company makers
+
+```{r fig.height = 7}
+cmpny_counts <- data.frame(sort(table(df_choc$company), decreasing = T))
+names(cmpny_counts) <- c('company', 'freq')
+cmpny_counts
+# include counts on plot instead of dataframe view...
+ggplot(cmpny_counts[1:40, ], aes(reorder(company, freq), freq)) +
+  geom_col() +
+  coord_flip()
+```
+
+origin of chocolates...
+
+
+```{r fig.height = 7}
+orgn_counts <- data.frame(sort(table(df_choc$orgn_or_nm), decreasing = T))
+names(orgn_counts) <- c('origin', 'freq')
+orgn_counts
+
+ggplot(orgn_counts[1:30, ], aes(reorder(origin, freq), freq)) +
+  geom_col() +
+  coord_flip()
+```
+
+when the chocolates were reviewed...
+
+```{r}
+ggplot(df_choc, aes(rvw_dt)) +
+  stat_count(geom = 'point') +
+  stat_count(geom = 'line')
+```
+
+distribution of cacao percent...
+
+```{r}
+ggplot(df_choc, aes(coa_prcnt)) +
+  geom_histogram(aes(y = ..density..), binwidth = 1) +
+  geom_density(alpha = 0.4, fill = 'gray') +
+  scale_x_continuous(breaks = seq(40, 100, 2))
+```
+
+where companies are located...
+
+```{r}
+loc_counts <- df_choc %>%
+  group_by(cmpny_loc) %>%
+  summarise(freq = n()) %>%
+  arrange(desc(freq))
+
+loc_counts
+
+# SQL and tabular syntax better...
+#loc_counts <- data.frame(sort(table(df_choc$cmpny_loc), decreasing = T))
+#names(loc_counts) <- c('location', 'freq')
+#loc_counts
+
+ggplot(loc_counts[1:30, ], aes(reorder(cmpny_loc, freq), freq)) +
+  geom_col() +
+  coord_flip()
+```
+
+distribution of ratings...
+
+```{r}
+ggplot(df_choc, aes(rating)) +
+  geom_histogram(aes(y = ..density..), binwidth = 0.2) +
+  geom_density(fill = 'gray', alpha = 0.3)
+```
+
+bean types...
+
+```{r}
+type_counts <- df_choc %>%
+  group_by(bean_type) %>%
+  summarise(freq = n()) %>%
+  arrange(desc(freq))
+
+type_counts
+
+ggplot(type_counts, aes(reorder(bean_type, freq), freq)) +
+  geom_col() +
+  coord_flip()
+```
+
+origin of beans...
+
+```{r}
+origin_counts <- df_choc %>%
+  group_by(bean_orgn) %>%
+  summarise(freq = n()) %>%
+  arrange(desc(freq))
+
+origin_counts
+
+ggplot(origin_counts[1:30, ], aes(reorder(bean_orgn, freq), freq)) +
+  geom_col() +
+  coord_flip()
+```
+
+## Relationships between variables
+
+```{r}
+
+```
+
+
