@@ -89,12 +89,13 @@ Again observations appear to be individual colleges.  But there are more observa
 Before I go into any analysis, I want to see whether or not there are multiple instances of the same college in either the college-type and college-region data sets.
 
 ```{r}
+library(stringr)  # get in the spirit of tidyverse
 # multiple college types
 df_col %>%
   group_by(school_name) %>%
   mutate(count = n()) %>%  # no 'summarise' to keep 'school_type' feature
   filter(count > 1) %>%
-  summarise(types = paste(school_type, collapse = '-'))
+  summarise(types = str_c(school_type, collapse = '-'))
 ```
 
 There are 20 colleges in the college by type data set with more than one college type.  Let's see if the same is true for the college by regions data set.
@@ -116,8 +117,6 @@ As seen, there are various missing values for different percentiles of mid-caree
 Here is the missing data by feature for the college degree data set.
 
 ```{r}
-library(knitr)
-
 # named vector to data frame
 nmd_vec_to_df <- function(x, start_col) {
   nms <- names(x)
@@ -161,13 +160,14 @@ df_start_vs_med <- df_reg %>%
   mutate(timeline = as_factor(timeline, fct_rev))  # reverse levels, start salary first
 
 # plot histogram with height as density and smoothed density
+library(scales)
 ggplot(df_start_vs_med, aes(salary, fill = timeline)) +
   geom_density(alpha = 0.2, color = NA) +
   geom_histogram(aes(y = ..density..), alpha = 0.5, position = 'dodge') +
   scale_fill_manual(values = c('darkgreen', 'purple4')) +
-  theme(legend.position = "top")
-
-library(scales)  # easy number formatting for inline R (in markdown below)
+  scale_x_continuous(labels = dollar) +
+  theme(legend.position = "top",
+        axis.text.y = element_blank(), axis.ticks.y = element_blank())
 ```
 
 The distribution for starting median salary is definitely concentrated at the lower range of salaries and is somewhat right-skewed.  Graduates of most schools start out with a median of `r dollar(median(df_reg$start_med_slry))` although there is a maximum median starting salary of `r dollar(max(df_reg$start_med_slry))`.  As working time progresses to mid-career, the distribution of median (50th percentile) salaries becomes more dispersed and the median of these increases to `r dollar(median(df_reg$mid_car_slry))`
@@ -179,7 +179,9 @@ I would expect this to be true, but data due dilligence requires that we inspect
 ```{r}
 ggplot(df_reg, aes(start_med_slry, mid_car_slry)) +
   geom_point(alpha = 0.6) +
-  geom_smooth(se = F)  # loess fit
+  geom_smooth(se = F) +  # loess fit
+  scale_x_continuous(labels = dollar) +
+  scale_y_continuous(labels = dollar)
 
 paste('correlation coefficient',
       round(with(df_reg, cor(start_med_slry, mid_car_slry)), 4))
@@ -191,30 +193,42 @@ There is a fairly strong correlation although the relationship is not simply lin
 
 How do salaries differ by degree?  Which majors show the highest starting salaries?
 
-```{r fig.height=8}
-ggplot(df_deg, aes(x = reorder(major, start_med_slry), start_med_slry)) +
-  geom_point(color = "darkgreen", shape = 12) + # cleaner as point instead of bars
+```{r fig.height=10, fig.width=12}
+p1 <- ggplot(df_deg, aes(x = reorder(major, start_med_slry), start_med_slry)) +
+  geom_col(fill = "darkgreen", alpha = 0.5) +
+  geom_col(aes(x = reorder(major, mid_car_slry), mid_car_slry), alpha = 0.3) +
+  geom_text(aes(label = dollar(start_med_slry)), size = 3, hjust = 1.1) +
+  scale_y_continuous(labels = dollar) +
   xlab(NULL) +
   coord_flip() +
-  ggtitle("median starting salaries by major")
+  ggtitle("ordered by starting salary")
+
+p2 <- ggplot(df_deg, aes(x = reorder(major, mid_car_slry), mid_car_slry)) +
+  geom_col(alpha = 0.5, fill = 'purple4') +
+  geom_col(aes(x = reorder(major, mid_car_slry), start_med_slry), alpha = 0.4) +
+  geom_text(aes(label = dollar(mid_car_slry)), size = 3, hjust = -0.1) +
+  scale_fill_manual(values = c('darkgreen', 'purple4')) +
+  scale_y_reverse(labels = dollar) +
+  scale_x_discrete(position = 'top') +
+  xlab(NULL) +
+  coord_flip() +
+  ggtitle("ordered by mid-career salary")
+
+library(gridExtra)
+grid.arrange(p1, p2, nrow = 1)
 ```
 
 Engineering, computer science, and 2 health occupational degrees have the highest median starting salaries.  But what about long-term salary potential?  Which degrees show the most growth in salary from starting to mid-career?
 
-```{r fig.height=8}
-# from wide to long format for mid-career percentiles
-df_maj_start_mid <- df_deg %>%
-  select(major, percent_chng, start_med_slry, mid_car_slry) %>%
-  gather(timeline, salary, start_med_slry, mid_car_slry) %>%
-  mutate(timeline = as_factor(timeline, fct_rev))
-
-ggplot(df_maj_start_mid, aes(x = reorder(major, percent_chng),
-                             y = salary, fill = timeline)) +
-  geom_col(position = 'identity', alpha = 0.6, show.legend = F) +
-  scale_fill_manual(values = c('darkgreen', 'purple4')) +
+```{r fig.height=8, fig.width=8}
+ggplot(df_deg, aes(x = reorder(major, percent_chng), mid_car_slry)) +
+  geom_col(alpha = 0.5) +
+  geom_col(aes(x = reorder(major, percent_chng), start_med_slry), alpha = 0.4) +
+  geom_text(aes(label = percent(percent_chng / 100)), size = 3, hjust = 1.1) +
+  scale_y_continuous(labels = dollar) +
   xlab(NULL) +
   coord_flip() +
-  ggtitle("starting/mid-career salaries by largest percent change")
+  ggtitle("ordered by percent change")
 ```
 
 This plot is ordered by those degrees that show the most percent change in career salary.  Although physician assistant has the highest starting salary, the median mid-career salary doesn't show a lot of change.  Majors like Philosophy and Math seem to grow the most by mid-career.  We can see that many of the engineering degrees, although with not the most change, start high and still have a high mid-career salary.
@@ -225,16 +239,18 @@ To get an idea for the ranges of mid-career salary, here's a plot of the differe
 # from wide to long format for mid-career percentiles
 df_maj_mid_car <- df_deg %>%
   select(-start_med_slry, -percent_chng) %>%
+  mutate(mid90th = mid_car_90th) %>%
   gather(percentile, salary, mid_car_10th:mid_car_90th)
 
-ggplot(df_maj_mid_car, aes(x = reorder(major, mid_car_slry),
+ggplot(df_maj_mid_car, aes(x = reorder(major, mid90th),
                            y = salary,
                            color = percentile), color = 'gray') +
   geom_point(shape = 12) +
   scale_color_brewer(type = 'div') +
-  xlab(NULL) +
+  scale_y_continuous(labels = dollar, sec.axis = dup_axis()) +
+  labs(x = NULL, y = NULL) +
   coord_flip() +
-  ggtitle("mid-career salary percentiles by largest median") +
+  ggtitle("mid-career salary by highest 90th percentile") +
   theme(legend.position = "top")
 ```
 
@@ -251,7 +267,7 @@ ggplot(df_col, aes(school_type)) +
 
 most of the schools in the data set are state schools.  As seen in the preliminary overview, some colleges have multiple types...
 
-```{r}
+```{r fig.height = 4, fig.width = 5}
 # colleges that appear as more than 1 type
 df_col_mult_types <- df_col %>%
   group_by(school_name) %>%
@@ -291,7 +307,9 @@ ggplot(df_col_type_slry, aes(reorder(school_type, salary), salary, fill = timeli
   scale_color_manual(values = c('darkgreen', 'purple4')) +
   geom_boxplot(alpha = 0.5, outlier.color = NA) +
   scale_fill_manual(values = c('darkgreen', 'purple4')) +
+  scale_y_continuous(labels = dollar) +
   theme(legend.position = "top") +
+  xlab('school type') +
   coord_flip()
 ```
 
@@ -327,6 +345,7 @@ ggplot(df_state_vs_party_long, aes(party_school, salary, fill = timeline)) +
   scale_color_manual(values = c('darkgreen', 'purple4')) +
   geom_boxplot(alpha = 0.5, outlier.color = NA) +
   scale_fill_manual(values = c('darkgreen', 'purple4')) +
+  scale_y_continuous(labels = dollar) +
   theme(legend.position = "top") +
   coord_flip()
 ```
@@ -367,6 +386,9 @@ df_col_top20 <- df_col %>%
 ggplot(df_col_top20, aes(reorder(school_name, mid_car_slry), mid_car_slry, fill = school_type)) +
   geom_col(alpha = 0.8) +
   scale_fill_manual(values = accent_colors_edit) +
+  geom_text(aes(label = dollar(mid_car_slry)), hjust = 1.1, color = 'gray30') +
+  scale_y_continuous(labels = dollar) +
+  xlab(NULL) +
   coord_flip()
 ```
 
@@ -397,7 +419,9 @@ ggplot(df_reg_slry, aes(reorder(region, salary), salary, fill = timeline)) +
   scale_color_manual(values = c('darkgreen', 'purple4')) +
   geom_boxplot(alpha = 0.5, outlier.color = NA) +
   scale_fill_manual(values = c('darkgreen', 'purple4')) +
+  scale_y_continuous(labels = dollar) +
   theme(legend.position = "top") +
+  xlab('region') +
   coord_flip()
 ```
 
@@ -437,6 +461,8 @@ ggplot(df_reg_col, aes(reorder(region, start_med_slry), mid_car_slry, fill = sch
   stat_summary(aes(region, start_med_slry, fill = school_type),
                geom = 'col', position = 'dodge') +
   scale_fill_brewer(palette = 'Pastel1') +
+  scale_y_continuous(labels = dollar) +
+  xlab('region') +
   ylab('salary') +
   ggtitle('mean starting and mid-career median salaries') +
   coord_flip()
@@ -456,7 +482,10 @@ df_reg_top20 <- df_reg %>%
 
 ggplot(df_reg_top20, aes(reorder(school_name, mid_car_slry), mid_car_slry, fill = region)) +
   geom_col(alpha = 0.8) +
+  geom_text(aes(label = dollar(mid_car_slry)), hjust = 1.1, color = 'gray30') +
   scale_fill_brewer(palette = 'Pastel2') +
+  scale_y_continuous(labels = dollar) +
+  xlab(NULL) +
   coord_flip()
 ```
 

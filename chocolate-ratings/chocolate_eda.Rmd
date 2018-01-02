@@ -40,12 +40,16 @@ glimpse(df_choc)
 various company makers
 
 ```{r fig.height = 7}
-cmpny_counts <- data.frame(sort(table(df_choc$company), decreasing = T))
-names(cmpny_counts) <- c('company', 'freq')
+cmpny_counts <- df_choc %>%
+  group_by(company) %>%
+  summarise(freq = n()) %>%
+  arrange(desc(freq))
+# all companies
 cmpny_counts
-# include counts on plot instead of dataframe view...
-ggplot(cmpny_counts[1:40, ], aes(reorder(company, freq), freq)) +
+# top 30
+ggplot(cmpny_counts[1:30, ], aes(reorder(company, freq), freq)) +
   geom_col() +
+  geom_text(aes(label = freq), hjust = 1.25, color = 'white') +
   coord_flip()
 ```
 
